@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "schatter-client",
+    "schatter-server"
+]
+resolver = "2"
