@@ -2,6 +2,8 @@
 
 members = [
     "schatter-client",
-    "schatter-server"
+    "schatter-server",
+    "schatter-lib"
 ]
 resolver = "2"
+

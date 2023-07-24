@@ -6,4 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+schatter-lib = { path = "../schatter-lib" }
 nannou = "0.18.1"
+nannou_osc = "0.18.0"
+image = "0.24.6"
+
+[dependencies.nokhwa]
+version = "0.10.4"
+# Use the native input backends, enable WGPU integration
+features = ["input-native"]
+optional = false
+
