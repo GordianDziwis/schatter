@@ -1,7 +1,9 @@
-dev-run: run-debug-pi
+dev-run: run-debug-pi-test
 
 # Debug
-run-debug-pi: push-debug-pi run-pi
+run-debug-pi-test: push-debug-pi run-pi-test
+
+run-debug-pi-stream: push-debug-pi run-pi-stream
 
 push-debug-pi: build-debug-pi clean-pi
 	scp ./target/armv7-unknown-linux-gnueabihf/debug/schatter-client raspberrypi-1:
@@ -28,8 +30,11 @@ build-debug-local:
 	cargo build
 
 # Common
-run-pi:
-	ssh -t raspberrypi-1 'RUST_BACKTRACE=1 ./schatter-client "$$(hostname -I | awk "{print $$1}")"'
+run-pi-test:
+	ssh -t raspberrypi-1 'RUST_BACKTRACE=1 ./schatter-client test'
+
+run-pi-stream:
+	ssh -t raspberrypi-1 'RUST_BACKTRACE=1 ./schatter-client stream'
 
 clean-pi:
 	ssh raspberrypi-1 'rm -f schatter-client'
