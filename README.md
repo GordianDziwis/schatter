@@ -1,6 +1,10 @@
+# (s|c)atter
+![](./public/img-0.jpg)
+
 What happened:
 
 1. Build the monolith with single addressable mapped LEDs
+
 
 What should happen:
 
@@ -28,3 +32,7 @@ sudo apt-get install libasound2-dev
 sudo apt install libxcb-shape0-dev libxcb-xfixes0-dev
 sudo apt-get install libvulkan1 mesa-vulkan-drivers vulkan-tools
 ```
+
+![](./public/img-1.jpg)
+![](./public/img-2.jpg)
+![](./public/img-3.jpg)
