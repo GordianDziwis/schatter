@@ -1,4 +1,5 @@
-# (s|c)atter
+# (s|c)hatter
+
 ![](./public/img-0.jpg)
 
 What happened:
