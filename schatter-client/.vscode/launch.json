@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug schatter-client",
+      "type": "codelldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/../target/debug/schatter-client",
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {
+        "/rustc/8ede3aae28fe6e4d52b38157d7bfe0d3bceef225/library": "/home/beavis/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library"
+      }
+    }
+  ]
+}

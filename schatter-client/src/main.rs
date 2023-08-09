@@ -1,130 +1,127 @@
-use nannou::prelude::*;
 use nannou_osc as osc;
-
-use std::{thread, time};
+use osc::Packet;
+use schatter_client::{display, Led};
+use smart_leds::colors::*;
+use smart_leds::gamma;
+use smart_leds::Gamma;
+use smart_leds::{SmartLedsWrite, RGB8};
+use std::env;
+use std::net::SocketAddrV4;
+use std::ops::Deref;
+use std::str::FromStr;
+use std::{default, fmt, thread, time};
 
 #[cfg(target_arch = "arm")]
-use {
-    smart_leds::{SmartLedsWrite, RGB8},
-    ws281x_rpi::Ws2812Rpi,
-};
+use ws281x_rpi::Ws2812Rpi;
+
+const PIN: i32 = 10;
+const NUM_LEDS: i32 = 1300;
+const PORT: u16 = 34254;
+const MTU: usize = 50000;
 
 fn main() {
-    nannou::app(model).update(update).run();
-}
+    let args: Vec<String> = env::args().collect();
+    let usage = format!("Usage {} IP", &args[0]);
+    if args.len() < 2 {
+        println!("{}", usage);
+        ::std::process::exit(1)
+    }
+    // let addr = match SocketAddrV4::from_str(&args[1]) {
+    //     Ok(_) => &args[1],
+    //     Err(_) => panic!("{}", usage),
+    // };
+    let target_addr = format!("{}:{}", "192.168.1.186", PORT);
+    let receiver = osc::Receiver::bind_with_mtu(PORT, 50000)
+        .expect("Could not bind to socket");
 
-struct Model {
-    receiver: osc::Receiver,
-    received_packets: Vec<(std::net::SocketAddr, osc::Packet)>,
-}
+    #[cfg(target_arch = "arm")]
+    let mut ws = Ws2812Rpi::new(NUM_LEDS, PIN).unwrap();
+    #[cfg(target_arch = "arm")]
+    test(&mut ws);
 
-// Make sure this matches the `TARGET_PORT` in the `osc_sender.rs` example.
-const PORT: u16 = 34254;
+    loop {
+        const DELAY: time::Duration = time::Duration::from_millis(10);
+        thread::sleep(DELAY);
 
-fn model(app: &App) -> Model {
-    let _w_id = app
-        .new_window()
-        .title("OSC Receiver")
-        .size(1400, 480)
-        .view(view)
-        .build()
-        .unwrap();
+        // Receive any pending osc packets.
+        for (packet, _) in receiver.try_iter() {
+            let stripe = get_rgb(packet);
 
-    // Bind an `osc::Receiver` to a port.
-    let receiver = osc::receiver(PORT).unwrap();
+            let stripe = stripe.iter().map(RGB8::from).collect::<Vec<_>>();
+            let stripe = gamma(stripe.iter().cloned()).collect::<Vec<_>>();
+            let stripe = stripe.iter().map(Led::from).collect::<Vec<_>>();
 
-    // A vec for collecting packets and their source address.
-    let received_packets = vec![];
+            #[cfg(debug_assertions)]
+            display(&stripe);
 
-    Model {
-        receiver,
-        received_packets,
+            #[cfg(target_arch = "arm")]
+            ws.write(stripe.iter().cloned()).unwrap();
+        }
     }
 }
 
-fn update(_app: &App, model: &mut Model, _update: Update) {
-    // Receive any pending osc packets.
-    for (packet, addr) in model.receiver.try_iter() {
-        model.received_packets.push((addr, packet));
-    }
-
-    // We'll display 10 packets at a time, so remove any excess.
-    let max_packets = 10;
-    while model.received_packets.len() > max_packets {
-        model.received_packets.remove(0);
-    }
-}
-
-// Draw the state of your `Model` into the given `Frame` here.
-fn view(app: &App, model: &Model, frame: Frame) {
-    let draw = app.draw();
-    draw.background().color(DARKBLUE);
-
-    // Create a string showing all the packets.
-    let mut packets_text = format!("Listening on port {}\nReceived packets:\n", PORT);
-    for &(addr, ref packet) in model.received_packets.iter().rev() {
-        packets_text.push_str(&format!("{}: {:?}\n", addr, packet));
-    }
-    let rect = frame.rect().pad(10.0);
-    draw.text(&packets_text)
-        .font_size(16)
-        .align_text_top()
-        .line_spacing(10.0)
-        .left_justify()
-        .wh(rect.wh());
-
-    draw.to_frame(app, &frame).unwrap();
+fn get_rgb(packet: Packet) -> Vec<Led> {
+    packet
+        .into_msgs()
+        .into_iter()
+        .flat_map(|message| message.args.unwrap_or_default())
+        .filter_map(|arg| match arg {
+            osc::Type::Color(color) => Some(color.into()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(target_arch = "arm")]
-fn blink() {
-    // GPIO Pin 10 is SPI
-    // Other modes and PINs are available depending on the Raspberry Pi revision
-    // Additional OS configuration might be needed for any mode.
-    // Check https://github.com/jgarff/rpi_ws281x for more information.
-    const PIN: i32 = 10;
-    const NUM_LEDS: usize = 8;
-    const DELAY: time::Duration = time::Duration::from_millis(1000);
-
-    let mut ws = Ws2812Rpi::new(NUM_LEDS as i32, PIN).unwrap();
-
-    let mut data: [RGB8; NUM_LEDS] = [RGB8::default(); NUM_LEDS];
-    let empty: [RGB8; NUM_LEDS] = [RGB8::default(); NUM_LEDS];
-
-    // Blink the LED's in a blue-green-red-white pattern.
-    for led in data.iter_mut().step_by(4) {
-        led.b = 32;
+fn test(ws: &mut Ws2812Rpi) {
+    let pattern: Vec<Led> = vec![
+        RED.into(),
+        GREEN.into(),
+        BLUE.into(),
+        MAGENTA.into(),
+        YELLOW.into(),
+        WHITE.into(),
+    ];
+    let mut stripe = Vec::default();
+    for i in 0..(NUM_LEDS) {
+        let n = (i as usize) % pattern.len();
+        stripe.push(pattern[n]);
     }
 
-    if NUM_LEDS > 1 {
-        for led in data.iter_mut().skip(1).step_by(4) {
-            led.g = 32;
-        }
-    }
-
-    if NUM_LEDS > 2 {
-        for led in data.iter_mut().skip(2).step_by(4) {
-            led.r = 32;
-        }
-    }
-
-    if NUM_LEDS > 3 {
-        for led in data.iter_mut().skip(3).step_by(4) {
-            led.r = 32;
-            led.g = 32;
-            led.b = 32;
-        }
-    }
-
-    loop {
-        // On
-        println!("LEDS on");
-        ws.write(data.iter().cloned()).unwrap();
-        thread::sleep(DELAY);
-
-        // Off
-        println!("LEDS off");
-        ws.write(empty.iter().cloned()).unwrap();
-        thread::sleep(DELAY);
-    }
+    // loop {
+    //     const DELAY: time::Duration = time::Duration::from_millis(10);
+    //     thread::sleep(DELAY);
+    //     #[cfg(debug_assertions)]
+    //     display(&stripe);
+    //     stripe.rotate_right(1);
+    //     match ws.write(stripe.iter().cloned()) {
+    //         Ok(_) => (),
+    //         Err(e) => println!("{}", e),
+    //     }
+    // }
+    // const DELAY: time::Duration = time::Duration::from_millis(10000);
+    // thread::sleep(DELAY);
 }
+
+// fn test() {
+
+//     // A vec for collecting packets and their source address.
+//     let mut received_packets = vec![];
+//     loop {
+//         const DELAY: time::Duration = time::Duration::from_millis(100);
+//         thread::sleep(DELAY);
+//
+//         // Receive any pending osc packets.
+//         for (packet, addr) in receiver.try_iter() {
+//             println!("hi2");
+//             received_packets.push((addr, packet));
+//         }
+
+//         // We'll display 10 packets at a time, so remove any excess.
+//         let max_packets = 10;
+//         while received_packets.len() > max_packets {
+//             println!("hi2");
+//             received_packets.remove(0);
+//         }
+//         let mut packets_text = format!("Listening on port {}\nReceived packets:\n", PORT);
+//

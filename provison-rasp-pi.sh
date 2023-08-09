@@ -15,4 +15,8 @@ echo 0 | sudo update-alternatives --config vim
 sudo update-alternatives --install /usr/bin/editor editor /usr/bin/nvim 60
 echo 0 | sudo update-alternatives --config editor
 
-# Install rpi-ws281x-rust
+# Setup SPI
+sudo bash -c "echo 'dtparam=spi=on' >> /boot/config.txt"
+sudo bash -c "echo 'spidev.bufsiz=32768' >> /boot/cmdline.txt"
+sudo bash -c "echo 'core_freq=250' >> /boot/config.txt"
+
