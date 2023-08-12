@@ -1,13 +1,7 @@
-use nannou::image::DynamicImage;
-use nannou::image::RgbImage;
-use nannou::wgpu;
-use nannou::App;
+use nannou::image::{DynamicImage, RgbImage};
+use nannou::{wgpu, App};
 use nokhwa::pixel_format::RgbFormat;
-use nokhwa::utils::CameraFormat;
-use nokhwa::utils::CameraIndex;
-use nokhwa::utils::FrameFormat;
-use nokhwa::utils::RequestedFormat;
-use nokhwa::utils::RequestedFormatType;
+use nokhwa::utils::{CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType};
 use nokhwa::Camera;
 
 const CAMERA_INDEX: u32 = 0;

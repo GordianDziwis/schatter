@@ -23,11 +23,11 @@ build-release-pi:
 	cargo build --package schatter-server
 
 # Local
-run-local: build-local
+run-debug-local:
 	RUST_BACKTRACE=1 cargo run -p schatter-client stream
 
-build-local:
-	cargo build
+run-release-local:
+	RUST_BACKTRACE=1 cargo run --release -p schatter-client stream
 
 # Common
 run-pi-test:

@@ -1,14 +1,21 @@
-use crate::motion_tracker::MotionTracker;
+use std::path::Path;
+
 use csv::Reader;
 use nannou::image::{ImageBuffer, Pixel};
 use nannou::prelude::*;
+use nannou::wgpu::{CommandEncoder, Device};
 use nannou_osc as osc;
 use nannou_osc::Type;
-use osc::Color;
-use std::path::Path;
+use osc::{encoder, Color};
+
+use crate::motion_tracker::MotionTracker;
 
 const WIDTH: u32 = 1795;
 const HEIGHT: u32 = 3350;
+
+const SCALE_TEXTURE: u32 = 2;
+const SCALED_WIDTH: u32 = WIDTH / SCALE_TEXTURE;
+const SCALED_HEIGHT: u32 = HEIGHT / SCALE_TEXTURE;
 const PATH_LED_POINTS_FILE: &str = "./points.csv";
 
 pub struct Monolith {
@@ -27,7 +34,7 @@ impl Monolith {
         let device = window.device();
         let sample_count = window.msaa_samples();
         let texture = wgpu::TextureBuilder::new()
-            .size([WIDTH, HEIGHT])
+            .size([WIDTH / SCALE_TEXTURE, HEIGHT / SCALE_TEXTURE])
             .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
             .sample_count(sample_count)
             .format(wgpu::TextureFormat::Rgba16Float)
@@ -57,11 +64,10 @@ impl Monolith {
     pub fn update(&mut self, app: &App, motion_tracker: &MotionTracker) {
         let window = &app.window(self.window_id).unwrap();
         self.draw(motion_tracker);
-        self.render(window);
-        self.snapshot(window);
+        self.render(window, true);
         self.draw(motion_tracker);
         self.draw_debug();
-        self.render(window);
+        self.render(window, false);
     }
 
     fn parse_led_coordinates(path: &Path) -> Vec<Point2> {
@@ -81,7 +87,7 @@ impl Monolith {
             Mat3::from_translation(Vec2::new(-(WIDTH as f32) / 2.0, (HEIGHT as f32) / 2.0))
                 * Mat3::from_scale(Vec2::new(1.0, -1.0));
 
-        transform.transform_point2(point)
+        transform.transform_point2(point) / SCALE_TEXTURE as f32
     }
 
     fn from_nannou_to_image(point: Point2) -> Point2 {
@@ -89,7 +95,7 @@ impl Monolith {
             Mat3::from_translation(Vec2::new((WIDTH as f32) / 2.0, (HEIGHT as f32) / 2.0))
                 * Mat3::from_scale(Vec2::new(1.0, -1.0));
 
-        transform.transform_point2(point)
+        transform.transform_point2(point) / SCALE_TEXTURE as f32
     }
 
     fn draw(&mut self, motion_tracker: &MotionTracker) {
@@ -98,32 +104,30 @@ impl Monolith {
         self.draw.texture(&motion_tracker.texture);
         self.draw
             .rect()
-            .x_y((WIDTH as f32) / 4.0, (HEIGHT as f32) / 4.0)
-            .w_h((WIDTH as f32) / 2.0, (HEIGHT as f32) / 2.0)
+            .x_y((SCALED_WIDTH as f32) / 4.0, (SCALED_HEIGHT as f32) / 4.0)
+            .w_h((SCALED_WIDTH as f32) / 2.0, (SCALED_HEIGHT as f32) / 2.0)
             .color(BLUE);
     }
 
     fn draw_debug(&mut self) {
         self.draw
             .rect()
-            .w_h(WIDTH as f32, HEIGHT as f32)
+            .w_h(SCALED_WIDTH as f32, SCALED_HEIGHT as f32)
             .no_fill()
             .stroke(HOTPINK)
-            .stroke_weight(10.0);
+            .stroke_weight(1.0);
 
         for coordinate in self.led_coordinates.iter() {
             self.draw
                 .ellipse()
-                .stroke(WHITE)
                 .color(WHITE)
-                .stroke_weight(1.0)
-                .w(10.0)
-                .h(10.0)
+                .w(1.0)
+                .h(1.0)
                 .x_y(coordinate.x as f32, coordinate.y as f32);
         }
     }
 
-    fn render(&mut self, window: &Window) {
+    fn render(&mut self, window: &Window, snapshot: bool) {
         let device = window.device();
         let ce_desc = wgpu::CommandEncoderDescriptor {
             label: Some("texture renderer"),
@@ -131,15 +135,15 @@ impl Monolith {
         let mut encoder = device.create_command_encoder(&ce_desc);
         self.renderer
             .render_to_texture(device, &mut encoder, &self.draw, &self.texture);
-        window.queue().submit(Some(encoder.finish()));
+        if snapshot {
+            self.snapshot(window, encoder)
+        } else {
+            window.queue().submit(Some(encoder.finish()));
+        }
     }
 
-    fn snapshot(&mut self, window: &Window) {
+    fn snapshot(&mut self, window: &Window, mut encoder: CommandEncoder) {
         let device = window.device();
-        let ce_desc = wgpu::CommandEncoderDescriptor {
-            label: Some("texture renderer"),
-        };
-        let mut encoder = device.create_command_encoder(&ce_desc);
         let snapshot = self
             .texture_capturer
             .capture(device, &mut encoder, &self.texture);

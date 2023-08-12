@@ -1,16 +1,12 @@
+use std::{env, thread, time};
+
 use nannou_osc as osc;
 use osc::Packet;
 use schatter_client::{display, osc_color_to_rgb8};
 use smart_leds::colors::*;
-use smart_leds::gamma;
-use smart_leds::RGB8;
-use std::env;
-use std::{thread, time};
-
+use smart_leds::{gamma, SmartLedsWrite, RGB8};
 #[cfg(target_arch = "arm")]
 use ws281x_rpi::Ws2812Rpi;
-
-use smart_leds::SmartLedsWrite;
 
 const PIN: i32 = 10;
 const NUM_LEDS: i32 = 1300;
@@ -63,14 +59,7 @@ fn stream() {
 #[cfg(target_arch = "arm")]
 fn test() {
     let mut ws = Ws2812Rpi::new(NUM_LEDS, PIN).unwrap();
-    let pattern: Vec<RGB8> = vec![
-        RED,
-        GREEN,
-        BLUE,
-        MAGENTA,
-        YELLOW,
-        WHITE,
-    ];
+    let pattern: Vec<RGB8> = vec![RED, GREEN, BLUE, MAGENTA, YELLOW, WHITE];
     let mut stripe = Vec::default();
     for i in 0..(NUM_LEDS) {
         let n = (i as usize) % pattern.len();

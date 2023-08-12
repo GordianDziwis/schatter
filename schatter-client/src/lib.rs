@@ -1,8 +1,9 @@
+use std::fmt;
+use std::io::Write;
+
 use colored::*;
 use nannou_osc as osc;
 use smart_leds::RGB8;
-use std::fmt;
-use std::io::Write;
 
 struct RGB8Wrapper(RGB8);
 
