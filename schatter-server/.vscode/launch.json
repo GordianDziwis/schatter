@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug schatter-server",
+      "sourceLanguages": ["rust"],
+      "type": "codelldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/../target/debug/schatter-server",
+      "args": ["127.0.0.1:34254"],
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {
+        "/rustc/8ede3aae28fe6e4d52b38157d7bfe0d3bceef225/library": "/home/beavis/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library"
+      }
+    }
+  ]
+}

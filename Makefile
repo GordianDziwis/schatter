@@ -1,6 +1,6 @@
 dev-run: run-debug-pi-test
 
-# Debug
+# Pi Debug
 run-debug-pi-test: push-debug-pi run-pi-test
 
 run-debug-pi-stream: push-debug-pi run-pi-stream
@@ -12,7 +12,7 @@ build-debug-pi:
 	CROSS_CONTAINER_ENGINE=podman cross build --package schatter-client --target armv7-unknown-linux-gnueabihf
 	cargo build --package schatter-server
 
-# Release
+# Pi release
 run-release-pi: push-release-pi run-pi
 
 push-release-pi: build-release-pi clean-pi
@@ -23,10 +23,10 @@ build-release-pi:
 	cargo build --package schatter-server
 
 # Local
-run-debug-local: build-debug-local
-	RUST_BACKTRACE=1 cargo run -p schatter-client
+run-local: build-local
+	RUST_BACKTRACE=1 cargo run -p schatter-client stream
 
-build-debug-local:
+build-local:
 	cargo build
 
 # Common

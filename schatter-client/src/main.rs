@@ -51,9 +51,9 @@ fn stream() {
         // Receive any pending osc packets.
         for (packet, _) in receiver.try_iter() {
             let stripe = get_rgb(packet);
-            let stripe_gamma_corrected = gamma(stripe.iter().cloned()).collect();
+            // let stripe_gamma_corrected = gamma(stripe.iter().cloned()).collect();
             #[cfg(debug_assertions)]
-            display(&stripe_gamma_corrected);
+            display(&stripe);
             #[cfg(target_arch = "arm")]
             ws.write(stripe_gamma_corrected.iter().cloned()).unwrap();
         }
