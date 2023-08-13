@@ -3,12 +3,12 @@ use std::path::Path;
 use csv::Reader;
 use nannou::image::{ImageBuffer, Pixel};
 use nannou::prelude::*;
-use nannou::wgpu::{CommandEncoder, Device};
+use nannou::wgpu::CommandEncoder;
 use nannou_osc as osc;
 use nannou_osc::Type;
-use osc::{encoder, Color};
+use osc::Color;
 
-use crate::motion_tracker::MotionTracker;
+use crate::camera_wrapper::CameraWrapper;
 
 const WIDTH: u32 = 1795;
 const HEIGHT: u32 = 3350;
@@ -61,7 +61,7 @@ impl Monolith {
         }
     }
 
-    pub fn update(&mut self, app: &App, motion_tracker: &MotionTracker) {
+    pub fn update(&mut self, app: &App, motion_tracker: &CameraWrapper) {
         let window = &app.window(self.window_id).unwrap();
         self.draw(motion_tracker);
         self.render(window, true);
@@ -98,7 +98,7 @@ impl Monolith {
         transform.transform_point2(point) / SCALE_TEXTURE as f32
     }
 
-    fn draw(&mut self, motion_tracker: &MotionTracker) {
+    fn draw(&mut self, motion_tracker: &CameraWrapper) {
         self.draw.reset();
         self.draw.background().color(BLACK);
         self.draw.texture(&motion_tracker.texture);
