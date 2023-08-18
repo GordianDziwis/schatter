@@ -1,3 +1,5 @@
+use std::io::Read;
+use std::net::TcpListener;
 use std::{env, thread, time};
 
 use nannou_osc as osc;
@@ -9,7 +11,7 @@ use smart_leds::{gamma, SmartLedsWrite, RGB8};
 use ws281x_rpi::Ws2812Rpi;
 
 const PIN: i32 = 10;
-const NUM_LEDS: i32 = 1300;
+const NUM_LEDS: i32 = 2620;
 const PORT: u16 = 34254;
 const MTU: usize = 50000;
 
@@ -41,17 +43,16 @@ fn stream() {
     let mut ws = Ws2812Rpi::new(NUM_LEDS, PIN).unwrap();
     let receiver = osc::Receiver::bind_with_mtu(PORT, 50000).expect("Could not bind to socket");
     loop {
-        const DELAY: time::Duration = time::Duration::from_millis(10);
-        thread::sleep(DELAY);
-
         // Receive any pending osc packets.
-        for (packet, _) in receiver.try_iter() {
+        for (packet, _) in receiver.iter() {
+            const DELAY: time::Duration = time::Duration::from_millis(100);
+            thread::sleep(DELAY);
             let stripe = get_rgb(packet);
             // let stripe_gamma_corrected = gamma(stripe.iter().cloned()).collect();
             #[cfg(debug_assertions)]
-            display(&stripe);
+            // display(&stripe);
             #[cfg(target_arch = "arm")]
-            ws.write(stripe_gamma_corrected.iter().cloned()).unwrap();
+            ws.write(stripe.iter().cloned()).unwrap();
         }
     }
 }
@@ -59,7 +60,24 @@ fn stream() {
 #[cfg(target_arch = "arm")]
 fn test() {
     let mut ws = Ws2812Rpi::new(NUM_LEDS, PIN).unwrap();
-    let pattern: Vec<RGB8> = vec![RED, GREEN, BLUE, MAGENTA, YELLOW, WHITE];
+    let pattern: Vec<RGB8> = vec![
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK,
+    ];
     let mut stripe = Vec::default();
     for i in 0..(NUM_LEDS) {
         let n = (i as usize) % pattern.len();
@@ -67,11 +85,11 @@ fn test() {
     }
 
     loop {
-        const DELAY: time::Duration = time::Duration::from_millis(10);
-        thread::sleep(DELAY);
+        // const DELAY: time::Duration = time::Duration::from_millis(1);
+        // thread::sleep(DELAY);
         #[cfg(debug_assertions)]
         display(&stripe);
-        stripe.rotate_right(1);
+        stripe.rotate_right(4);
         match ws.write(stripe.iter().cloned()) {
             Ok(_) => (),
             Err(e) => println!("{}", e),

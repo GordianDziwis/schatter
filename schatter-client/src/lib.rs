@@ -1,9 +1,10 @@
 use std::fmt;
-use std::io::Write;
+use std::io::{Write, stdout};
 
 use colored::*;
 use nannou_osc as osc;
 use smart_leds::RGB8;
+use termion::cursor::Goto;
 
 struct RGB8Wrapper(RGB8);
 
@@ -21,9 +22,9 @@ impl fmt::Display for RGB8Wrapper {
 }
 
 pub fn display(leds: &Vec<RGB8>) {
+    print!("{}", Goto(1, 1)); // Move the cursor to the beginning of the line
     for led in leds {
         print!("{}", RGB8Wrapper(*led));
     }
-    print!("\r");
-    std::io::stdout().flush().unwrap();
+    stdout().flush().unwrap();
 }

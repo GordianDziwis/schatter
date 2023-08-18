@@ -6,10 +6,16 @@ edition = "2021"
 [dependencies]
 nannou_osc = "0.18.0"
 smart-leds = "0.3.0"
+termion = "1.5.6"
 colored = "2.0"
 rand = "0.8.3"
+serde_json = "1.0"
 [target.'cfg(target_arch = "arm")'.dependencies]
 ws281x-rpi = "0.0.1"
+
+[dependencies.rgb]
+version = "0.8.36"
+features = ["serde"]
 
 [package.metadata.cross.target.armv7-unknown-linux-gnueabihf]
 pre-build = ["apt-get update && apt-get install --assume-yes libclang-dev clang"]
