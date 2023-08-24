@@ -1,7 +1,9 @@
 use std::env;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use opencv::core::{Point, Ptr, Size, Vector, CV_8UC3};
+use nannou::prelude::Point2;
+use opencv::core::{Point, Ptr, Rect, Size, Vector, CV_8UC3};
 use opencv::imgproc::{bounding_rect, contour_area, rectangle, threshold, LINE_AA};
 use opencv::prelude::*;
 use opencv::tracking::TrackerKCF;
@@ -11,16 +13,17 @@ use opencv::videoio::{
     CAP_PROP_FRAME_HEIGHT, CAP_PROP_FRAME_WIDTH, CAP_PROP_POS_FRAMES,
 };
 use opencv::{core, highgui, imgproc, types, videoio, Result};
+use parry3d::math::Real;
 
 const URL2: &str = "rtspsrc location=rtsp://schatter:titstits@192.168.1.177:554/stream2 \
-                   latency=100 !  rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! \
-                   video/x-raw,format=BGRx !  appsink";
-const URL: &str = "rtspsrc location=rtsp://schatter:titstits@192.168.1.177:554/stream2 \
+                    latency=100 !  rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! \
+                    video/x-raw,format=BGRx !  appsink";
+const URL: &str = "rtspsrc location=rtsp://schatter:titstits@192.168.1.178:554/stream2 \
                    latency=100 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! \
                    video/x-raw,format=BGR ! appsink max-buffers=1 drop=true";
 const MAX_TRACKER_COUNT: usize = 4;
 const TIME_TO_KILL: u64 = 10;
-const MIN_CONTOUR_AREA: f64 = 800.0; 
+const MIN_CONTOUR_AREA: f64 = 400.0;
 
 pub struct VideoProcessor {
     mask_window: String,
@@ -31,10 +34,21 @@ pub struct VideoProcessor {
     output: Mat,
     mask: Mat,
     trackers: Vec<(Ptr<TrackerKCF>, core::Rect, Instant)>,
+    pub position: Arc<Mutex<Point2>>,
 }
 
 impl VideoProcessor {
-    pub fn new() -> Result<Self, opencv::Error> {
+    fn calculate_position(&self) -> Point2 {
+        match self.trackers.get(0) {
+            Some((_, rect, _)) => Point2::new(
+                (rect.x + rect.width / 2) as f32,
+                (rect.y + rect.height / 2) as f32,
+            ),
+            None => Point2::new(450.0, 129.0),
+        }
+    }
+
+    pub fn new(position: Arc<Mutex<Point2>>) -> Result<Self, opencv::Error> {
         println!("This will take some time");
         // let param = opencv::tracking::TrackerKCF_Params::default().unwrap();
         // let mut tracker = TrackerKCF::create(param).unwrap();
@@ -65,21 +79,28 @@ impl VideoProcessor {
         if !opened {
             panic!("Unable to open default camera!");
         }
+
         Ok(Self {
             mask_window: "Mask".to_string(),
             output_window: "Output".to_string(),
             cam,
-            background_subtractor: create_background_subtractor_mog2(1000, 40.0, true)?,
+            background_subtractor: create_background_subtractor_mog2(1000, 50.0, true)?,
             frame: Mat::default(),
             output: Mat::default(),
             mask: Mat::default(),
             trackers: Vec::new(),
+            position,
         })
     }
 
     pub fn process_frames(&mut self) {
         loop {
             self.process_frame().unwrap();
+            {
+                let mut position = self.position.lock().unwrap();
+                *position = self.calculate_position(); // Assuming calculate_position() is a method that calculates the position
+            } // The lock is dropped here, allowing other threads to access `position`
+              // println!("{:?}", self.position);
         }
     }
 
@@ -88,15 +109,25 @@ impl VideoProcessor {
             &mut self.background_subtractor,
             &self.frame,
             &mut self.mask,
-            0.001,
+            -1.0,
         )
         .unwrap();
         let mut thresh = Mat::default();
         threshold(&self.mask, &mut thresh, 245.0, 255.0, 0).unwrap();
         self.mask = thresh;
+        let rect = Rect::new(274, 108, 50, 140);
+        rectangle(
+            &mut self.mask,
+            rect,
+            core::Scalar::new(0., 0., 0., 0.),
+            -1,
+            LINE_AA,
+            0,
+        )
+        .unwrap();
     }
 
-    fn clean_trackers(&mut self) {
+    fn process_trackers(&mut self) {
         let mut i = 0;
         while i < self.trackers.len() {
             let (tracker, rect, time) = &mut self.trackers[i];
@@ -112,15 +143,28 @@ impl VideoProcessor {
                     0,
                 )
                 .unwrap();
-                rectangle(
-                    &mut self.output,
-                    *rect,
-                    core::Scalar::new(255., 0., 0., 255.),
-                    1,
-                    LINE_AA,
-                    0,
-                )
-                .unwrap();
+                if i == 0 {
+                    rectangle(
+                        &mut self.output,
+                        *rect,
+                        core::Scalar::new(255., 255., 255., 255.),
+                        1,
+                        LINE_AA,
+                        0,
+                    )
+                    .unwrap();
+                } else {
+                    rectangle(
+                        &mut self.output,
+                        *rect,
+                        core::Scalar::new(255., 0., 0., 255.),
+                        1,
+                        LINE_AA,
+                        0,
+                    )
+                    .unwrap();
+                }
+
                 i += 1;
             } else {
                 self.trackers.remove(i);
@@ -185,7 +229,7 @@ impl VideoProcessor {
         if self.frame.size()?.width > 0 {
             self.subtract_background();
 
-            self.clean_trackers();
+            self.process_trackers();
 
             self.process_contours();
 

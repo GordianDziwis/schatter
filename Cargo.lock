@@ -3491,8 +3491,6 @@ dependencies = [
 [[package]]
 name = "ws281x-rpi"
 version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d768fe61b40787b95662aece079d7477f5d9c3787a717aade53ca89f4c4ada3a"
 dependencies = [
  "bindgen 0.59.2",
  "cc",

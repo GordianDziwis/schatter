@@ -2,11 +2,15 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use ::rgb::RGB8;
 use csv::Reader;
 use nannou::image::{ImageBuffer, Pixel};
 use nannou::prelude::*;
+use nannou::rand;
+use nannou::rand::Rng;
 use nannou::wgpu::CommandEncoder;
 use nannou_osc as osc;
 use nannou_osc::Type;
@@ -15,6 +19,7 @@ use parry3d::math::Real;
 use parry3d::na::{Point3, Rotation3};
 
 use crate::collision_detector::CollisionDetector;
+use crate::motion_tracker::VideoProcessor;
 
 const WIDTH: f32 = 1460.0;
 const DEPTH: f32 = 335.0;
@@ -42,12 +47,12 @@ const STRIPES_NUM_LEDS: [usize; 58] = [
     545,
     626,
     712,
-    754,
+    754 + 1,
     843,
-    911,
-    929,
-    954,
-    974,
+    911 + 1,
+    929 + 1,
+    954 + 1,
+    974 + 1,
     998,
     1029,
     1067,
@@ -67,28 +72,28 @@ const STRIPES_NUM_LEDS: [usize; 58] = [
     229 + 1310,
     344 + 1310,
     416 + 1310,
-    491 + 1310,
+    491 + 1310 - 1,
     545 + 1310,
-    626 + 1310,
+    626 + 1310 - 1,
     712 + 1310,
-    754 + 1310,
+    754 + 1310 - 2,
     843 + 1310,
-    911 + 1310,
-    929 + 1310,
-    954 + 1310,
-    974 + 1310,
-    998 + 1310,
-    1029 + 1310,
-    1067 + 1310,
-    1079 + 1310,
-    1107 + 1310,
-    1118 + 1310,
-    1141 + 1310,
-    1164 + 1310,
-    1173 + 1310,
-    1197 + 1310,
-    1230 + 1310,
-    1266 + 1310,
+    911 + 1310 - 2,
+    929 + 1310 - 2,
+    954 + 1310 - 2,
+    974 + 1310 - 2,
+    998 + 1310 - 2,
+    1029 + 1310 - 3,
+    1067 + 1310 - 3,
+    1079 + 1310 - 2,
+    1107 + 1310 - 3,
+    1118 + 1310 - 3,
+    1141 + 1310 - 3,
+    1164 + 1310 - 3,
+    1173 + 1310 - 3,
+    1197 + 1310 - 3,
+    1230 + 1310 - 3,
+    1266 + 1310 - 4,
 ];
 pub struct Monolith {
     pub texture: wgpu::Texture,
@@ -99,6 +104,9 @@ pub struct Monolith {
     texture_capturer: wgpu::TextureCapturer,
     led_coordinates: LedCoordinates,
     collision_detector: CollisionDetector,
+    viewpoint: Arc<Mutex<Point2>>,
+    time_animation: Instant,
+    stripe: Vec<usize>,
 }
 
 pub struct Cone {}
@@ -135,8 +143,8 @@ impl LedCoordinates {
             .skip(NUM_LED_FRONT)
             .map(|c| {
                 (
-                    Point3::new(-(WIDTH + DEPTH) / 2.0, c.y + HEIGHT / 2.0, c.x),
-                    Point3::new(-WIDTH + (DEPTH / 2.0), c.y + HEIGHT / 2.0, c.x),
+                    Point3::new(-WIDTH / 2.0, c.y + HEIGHT / 2.0, c.x),
+                    Point3::new(WIDTH / 2.0, c.y + HEIGHT / 2.0, -c.x - DEPTH / 2.0),
                 )
             })
             .unzip();
@@ -145,7 +153,16 @@ impl LedCoordinates {
             .iter()
             .map(|c| Monolith::from_nannou_to_image(*c))
             .collect();
-        let led_3d = [led_3d_n, led_3d_e, led_3d_s, led_3d_w].concat();
+        let led_3d = [led_3d_n, led_3d_w, led_3d_s, led_3d_e].concat();
+        println!("{}", led_3d[20]);
+        println!("{}", led_3d[1330]);
+        // println!("{}", led_3d[1268]);
+        // println!("XXX");
+        // println!("{}", led_2d[1290]);
+        // println!("{}", led_3d[1290]);
+        // println!("XXX");
+        // println!("{}", led_2d[1309]);
+        // println!("{}", led_3d[1309]);
         LedCoordinates {
             led_2d,
             led_2d_image,
@@ -180,6 +197,14 @@ impl Monolith {
             Frame::TEXTURE_FORMAT,
         );
 
+        let position = Arc::new(Mutex::new(Point2::default()));
+        let position_clone = Arc::clone(&position);
+
+        thread::spawn(move || {
+            let mut motion_tracker = VideoProcessor::new(position_clone).unwrap();
+            motion_tracker.process_frames();
+        });
+
         Monolith {
             window_id,
             draw: nannou::Draw::new().scale(SCALE_TEXTURE),
@@ -189,6 +214,9 @@ impl Monolith {
             texture_capturer: wgpu::TextureCapturer::default(),
             led_coordinates: LedCoordinates::new(),
             collision_detector: CollisionDetector::new(),
+            viewpoint: position,
+            time_animation: Instant::now(),
+            stripe: Vec::new(),
         }
     }
 
@@ -206,6 +234,7 @@ impl Monolith {
 
     pub fn update(&mut self, app: &App, update: &Update) {
         let window = &app.window(self.window_id).unwrap();
+        // println!("{:?}", &self.viewpoint.lock().unwrap()); // Print the viewpoint_clone
         self.draw(update);
         #[cfg(debug_assertions)]
         self.draw_debug(update);
@@ -213,35 +242,93 @@ impl Monolith {
     }
 
     fn draw(&mut self, update: &Update) {
+        let mut rng = rand::thread_rng();
         self.draw.reset();
+        self.draw.background().color(WHITE);
 
-        self.draw.background().color(BLACK);
+        for i in 0..((NUM_LED_SIDE - 1) * 2) {
+            self.render_led(
+                i,
+                Srgb::new(
+                    rng.gen_range(230..255),
+                    rng.gen_range(230..255),
+                    rng.gen_range(230..255),
+                ),
+            )
+        }
 
         let time_since_update = update.since_last.secs();
+
         let time_since_start = update.since_start.secs();
-        let view = Point3::new(-000.0, 2320.0, -3000.0);
-        self.draw_viewcone(time_since_start, view);
-        self.draw
-            .line()
-            .color(WHITE)
-            .start(Vec2::new(-WIDTH_NET / 2.0, time_since_start as f32));
+
+        let pos = (*self.viewpoint.lock().unwrap()).clone();
+        // println!("{:?}", &pos); // Print the viewpoint_clone
+        let view = Monolith::from_camera_to_col(pos);
+        // println!("{:?}", &view); // Print the viewpoint_clone
+        // self.draw
+        //     .line()
+        //     .color(RED)
+        //     .stroke_weight(200.0)
+        //     .start(Point2::new(
+        //         -WIDTH_NET / 2.0,
+        //         (time_since_start.sin() * HEIGHT as f64) as f32 / 2.0,
+        //     ))
+        //     .end(Point2::new(
+        //         WIDTH_NET / 2.0,
+        //         (time_since_start.sin() * HEIGHT as f64) as f32 / 2.0,
+        //     ));
+        // self.draw
+        //     .line()
+        //     .color(RED)
+        //     .stroke_weight(100.0)
+        //     .start(Point2::new(
+        //         (time_since_start.sin() * (WIDTH_NET as f64)) as f32 / 2.0,
+        //         -HEIGHT / 2.0,
+        //     ))
+        //     .end(Point2::new(
+        //         (time_since_start.sin() * (WIDTH_NET as f64)) as f32 / 2.0,
+        //         HEIGHT / 2.0,
+        //     ));
+        if self.time_animation.elapsed() > Duration::from_millis(1000) {
+            self.time_animation = Instant::now();
+            self.stripe = (0..40)
+                .map(|_| rng.gen_range(0..STRIPES_NUM_LEDS.len() - 1))
+                .collect();
+        }
+
+        for stripe_index in self.stripe.iter() {
+            for i in STRIPES_NUM_LEDS[*stripe_index]..STRIPES_NUM_LEDS[stripe_index + 1] {
+                self.render_led(
+                    i,
+                    Srgb::new(
+                        rng.gen_range(0..132),
+                        rng.gen_range(171..221),
+                        rng.gen_range(254..255),
+                    ),
+                )
+            }
+        }
+
+        self.draw_viewcone(time_since_start, view, 300.0, BLACK);
     }
 
-    fn draw_viewcone(&self, update: f64, view: Point3<Real>) {
-        let rotation =
-            Rotation3::from_axis_angle(&parry3d::na::Vector3::y_axis(), (update * 3.10) as f32);
-        let rotation2 =
-            Rotation3::from_axis_angle(&parry3d::na::Vector3::x_axis(), (update * 2.10) as f32);
-        let view = rotation * rotation2 * view;
+    fn draw_viewcone(&self, update: f64, view: Point3<Real>, circle_radius: f32, color: Srgb<u8>) {
+        // let view = Point3::new(2000.0, 1800.0, 0.0);
+        // let rotation =
+        // Rotation3::from_axis_angle(&parry3d::na::Vector3::y_axis(), (update / 8.0) as f32);
+        //         let rotation2 =
+        //             Rotation3::from_axis_angle(&parry3d::na::Vector3::x_axis(), (update * 2.10) as f32);
+        // let view = rotation *  view;
 
         for (i, coordinate) in self.led_coordinates.led_2d.iter().enumerate() {
-            if self
-                .collision_detector
-                .detect_collison(view, &self.led_coordinates.led_3d[i])
-            {
+            if self.collision_detector.detect_collison(
+                view,
+                &self.led_coordinates.led_3d[i],
+                circle_radius,
+            ) {
                 self.draw
                     .ellipse()
-                    .color(WHITE)
+                    .color(color)
                     .w(10.0)
                     .h(10.0)
                     .x_y(coordinate.x as f32, coordinate.y as f32);
@@ -281,6 +368,15 @@ impl Monolith {
         transform.transform_point2(point)
     }
 
+    fn from_camera_to_col(point: Point2) -> Point3<Real> {
+        let mm_per_px = 6220.0 / 308.0;
+        Point3::new(
+            point.y * mm_per_px - 2700.0,
+            1880.0,
+            -point.x * mm_per_px + 5000.0,
+        )
+    }
+
     fn from_nannou_to_image(point: Point2) -> Point2 {
         let transform =
             Mat3::from_translation(Vec2::new((WIDTH_NET as f32) / 2.0, (HEIGHT as f32) / 2.0))
@@ -318,15 +414,19 @@ impl Monolith {
             .capture(device, &mut encoder, &self.texture);
         window.queue().submit(Some(encoder.finish()));
         let led_coordinates = self.led_coordinates.led_2d_image[0..NUM_LEDS_TO_SEND].to_vec();
+
+        let sender = osc::sender()
+            .expect("Could not bind to default socket")
+            .connect(RASPBERRY_PI_ADDRESS)
+            .expect("Could not connect to socket at address");
+        let sender = Arc::new(Mutex::new(sender));
+
         snapshot
             .read(move |result| {
                 let image = result.expect("failed to map texture memory").to_owned();
                 let addr = "/";
                 let args = Monolith::get_pixels(led_coordinates, &image);
-                let sender = osc::sender()
-                    .expect("Could not bind to default socket")
-                    .connect(RASPBERRY_PI_ADDRESS)
-                    .expect("Could not connect to socket at address");
+                let sender = sender.lock().unwrap();
                 // println!("{:?}", args[20]);
                 sender.send((addr, args)).ok();
             })

@@ -19,10 +19,8 @@ use std::thread;
 use std::io::Write;
 
 const RASPBERRY_PI_ADDRESS: &str = "127.0.0.1:34254";
+
 fn main() {
-    // let mut processor = VideoProcessor::new().unwrap();
-    // processor.process_frames();
-    //
     nannou::app(model).update(update).run();
 }
 
