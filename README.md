@@ -1,17 +1,6 @@
 # (s|c)hatter
 
-<div>
-  <iframe
-    src="https://www.instagram.com/p/C7ubAWoMh-_/embed"
-    frameborder="0"
-    allowfullscreen
-    scrolling="no"
-    allowtransparency
-    width='100%'
-    height="100%"
-    style="aspect-ratio: 1/1;"
-  ></iframe>
-</div>
+Here is a **[video](https://www.instagram.com/p/C7ubAWoMh-_)** of the finished installation.
 
 ## What happened
 
