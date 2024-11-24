@@ -1,21 +1,25 @@
 # (s|c)hatter
 
-**Deadline is 18.08. Pull request are welcome!**
+<div>
+  <iframe
+    src="https://www.instagram.com/p/C7ubAWoMh-_/embed"
+    frameborder="0"
+    allowfullscreen
+    scrolling="no"
+    allowtransparency
+    width='100%'
+    height="100%"
+    style="aspect-ratio: 1/1;"
+  ></iframe>
+</div>
 
-![](./public/img-0.jpg)
-
-
-What happened:
+## What happened
 
 1. Build the monolith with single addressable mapped LEDs
-
-
-What should happen (if no one has a better idea):
-
 1. A webcam mounted under the ceiling
-2. Object track a random visitor
-3. Project an [anamorphic circle](https://en.wikipedia.org/wiki/Anamorphosis) on the surface of the monolith for this visitor
-
+1. Object track a random visitor
+1. Project an [anamorphic circle](https://en.wikipedia.org/wiki/Anamorphosis) on the surface of the monolith for this visitor
+1. Provoke some dude to blow it up
 
 ## Design
 
@@ -39,7 +43,8 @@ sudo apt install libxcb-shape0-dev libxcb-xfixes0-dev
 sudo apt-get install libvulkan1 mesa-vulkan-drivers vulkan-tools
 ```
 
+![](./public/img-0.jpg)
+![](./public/img-4.jpg)
 ![](./public/img-1.jpg)
 ![](./public/img-2.jpg)
 ![](./public/img-3.jpg)
-![](./public/img-4.jpg)
