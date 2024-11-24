@@ -1,29 +1,23 @@
-use std::env;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use nannou::prelude::Point2;
-use opencv::core::{Point, Ptr, Rect, Size, Vector, CV_8UC3};
+use opencv::core::{Point, Ptr, Rect, Vector};
 use opencv::imgproc::{bounding_rect, contour_area, rectangle, threshold, LINE_AA};
 use opencv::prelude::*;
 use opencv::tracking::TrackerKCF;
 use opencv::video::{create_background_subtractor_mog2, BackgroundSubtractorMOG2};
-use opencv::videoio::{
-    CAP_FFMPEG, CAP_GSTREAMER, CAP_PROP_AUTO_EXPOSURE, CAP_PROP_BUFFERSIZE, CAP_PROP_FPS,
-    CAP_PROP_FRAME_HEIGHT, CAP_PROP_FRAME_WIDTH, CAP_PROP_POS_FRAMES,
-};
+use opencv::videoio::CAP_GSTREAMER;
 use opencv::{core, highgui, imgproc, types, videoio, Result};
-use parry3d::math::Real;
 
-const URL2: &str = "rtspsrc location=rtsp://schatter:titstits@192.168.1.177:554/stream2 \
-                    latency=100 !  rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! \
-                    video/x-raw,format=BGRx !  appsink";
 const URL: &str = "rtspsrc location=rtsp://schatter:titstits@192.168.1.178:554/stream2 \
                    latency=100 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! \
                    video/x-raw,format=BGR ! appsink max-buffers=1 drop=true";
-const MAX_TRACKER_COUNT: usize = 4;
-const TIME_TO_KILL: u64 = 10;
-const MIN_CONTOUR_AREA: f64 = 400.0;
+const MAX_TRACKER_COUNT: usize = 1;
+const TIME_TO_KILL: u64 = 3;
+const MIN_CONTOUR_AREA: f64 = 500.0;
+const BACKGROUND_THRESHOLD: f64 = 30.0;
+const BACKGROUND_LEARNING_RATE: f64 = -1.0;
 
 pub struct VideoProcessor {
     mask_window: String,
@@ -34,45 +28,27 @@ pub struct VideoProcessor {
     output: Mat,
     mask: Mat,
     trackers: Vec<(Ptr<TrackerKCF>, core::Rect, Instant)>,
-    pub position: Arc<Mutex<Point2>>,
+    pub position: Arc<Mutex<Option<Point2>>>,
+    pub new: Arc<Mutex<bool>>,
 }
 
 impl VideoProcessor {
-    fn calculate_position(&self) -> Point2 {
+    fn calculate_position(&self) -> Option<Point2> {
         match self.trackers.get(0) {
-            Some((_, rect, _)) => Point2::new(
+            Some((_, rect, _)) => Some(Point2::new(
                 (rect.x + rect.width / 2) as f32,
                 (rect.y + rect.height / 2) as f32,
-            ),
-            None => Point2::new(450.0, 129.0),
+            )),
+            None => None,
         }
     }
 
-    pub fn new(position: Arc<Mutex<Point2>>) -> Result<Self, opencv::Error> {
-        println!("This will take some time");
-        // let param = opencv::tracking::TrackerKCF_Params::default().unwrap();
-        // let mut tracker = TrackerKCF::create(param).unwrap();
-        // let mut frame = Mat::new_size_with_default(
-        //     Size::new(640, 480),
-        //     CV_8UC3,
-        //     opencv::core::Scalar::all(0.0),
-        // )?;
-        println!("Done");
-
-        let rect = core::Rect::new(50, 50, 200, 200);
-        // tracker.init(&frame, rect).unwrap();
-
+    pub fn new(
+        position: Arc<Mutex<Option<Point2>>>,
+        new: Arc<Mutex<bool>>,
+    ) -> Result<Self, opencv::Error> {
         highgui::named_window(&"Mask".to_string(), highgui::WINDOW_AUTOSIZE)?;
         highgui::named_window(&"Output".to_string(), highgui::WINDOW_AUTOSIZE)?;
-        // let params: Vector<i32> = Vector::from_slice(&[CAP_PROP_AUTO_EXPOSURE, 3]);
-        let params: Vector<i32> = Vector::from_slice(&[
-            CAP_PROP_BUFFERSIZE,
-            1,
-            CAP_PROP_FRAME_WIDTH,
-            640,
-            CAP_PROP_FRAME_HEIGHT,
-            480,
-        ]);
         let params: Vector<i32> = Vector::new();
         let cam = videoio::VideoCapture::from_file_with_params(URL, CAP_GSTREAMER, &params)?;
         let opened = videoio::VideoCapture::is_opened(&cam)?;
@@ -84,12 +60,17 @@ impl VideoProcessor {
             mask_window: "Mask".to_string(),
             output_window: "Output".to_string(),
             cam,
-            background_subtractor: create_background_subtractor_mog2(1000, 50.0, true)?,
+            background_subtractor: create_background_subtractor_mog2(
+                1000,
+                BACKGROUND_THRESHOLD,
+                true,
+            )?,
             frame: Mat::default(),
             output: Mat::default(),
             mask: Mat::default(),
             trackers: Vec::new(),
             position,
+            new,
         })
     }
 
@@ -98,9 +79,8 @@ impl VideoProcessor {
             self.process_frame().unwrap();
             {
                 let mut position = self.position.lock().unwrap();
-                *position = self.calculate_position(); // Assuming calculate_position() is a method that calculates the position
-            } // The lock is dropped here, allowing other threads to access `position`
-              // println!("{:?}", self.position);
+                *position = self.calculate_position();
+            }
         }
     }
 
@@ -109,13 +89,13 @@ impl VideoProcessor {
             &mut self.background_subtractor,
             &self.frame,
             &mut self.mask,
-            -1.0,
+            BACKGROUND_LEARNING_RATE,
         )
         .unwrap();
         let mut thresh = Mat::default();
         threshold(&self.mask, &mut thresh, 245.0, 255.0, 0).unwrap();
         self.mask = thresh;
-        let rect = Rect::new(274, 108, 50, 140);
+        let rect = Rect::new(104, 93, 180, 140);
         rectangle(
             &mut self.mask,
             rect,
@@ -194,6 +174,9 @@ impl VideoProcessor {
                 let mut tracker = TrackerKCF::create(param).unwrap();
                 tracker.init(&self.frame, rectangl).unwrap();
                 self.trackers.push((tracker, rectangl, Instant::now()));
+
+                let mut new = self.new.lock().unwrap();
+                *new = true;
                 rectangle(
                     &mut self.output,
                     rectangl,

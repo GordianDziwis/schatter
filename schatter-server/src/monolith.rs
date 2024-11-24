@@ -1,21 +1,24 @@
 use std::io::Write;
 use std::net::TcpStream;
+use std::ops::{Add, Range};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ::rgb::RGB8;
 use csv::Reader;
+use nannou::draw::properties::ColorScalar;
 use nannou::image::{ImageBuffer, Pixel};
+use nannou::lyon::geom::euclid::Trig;
+use nannou::prelude::float::FloatCore;
 use nannou::prelude::*;
 use nannou::rand;
 use nannou::rand::Rng;
 use nannou::wgpu::CommandEncoder;
 use nannou_osc as osc;
 use nannou_osc::Type;
-use osc::Color;
-use parry3d::math::Real;
+use osc::{Color, Connected, Sender};
+use parry3d::math::{Real, Vector};
 use parry3d::na::{Point3, Rotation3};
 
 use crate::collision_detector::CollisionDetector;
@@ -30,10 +33,26 @@ const SCALE_TEXTURE: f32 = 0.5;
 const PATH_LED_POINTS_FILE: &str = "./points.csv";
 const NUM_LED_FRONT: usize = 1173;
 const NUM_LED_SIDE: usize = 1310;
+const FLEEING_TIME: Duration = Duration::new(3, 0);
 
 // const RASPBERRY_PI_ADDRESS: &str = "127.0.0.1:34254";
 const RASPBERRY_PI_ADDRESS: &str = "192.168.1.186:34254";
 const NUM_LEDS_TO_SEND: usize = 2 * NUM_LED_SIDE;
+
+struct Client {
+    sender: Sender<Connected>,
+    led_range: Range<usize>,
+}
+
+impl Client {
+    fn new(address: &str, led_range: Range<usize>) -> Self {
+        let sender = osc::sender()
+            .expect("Could not bind to default socket")
+            .connect(address)
+            .expect("Could not connect to socket at address");
+        Client { sender, led_range }
+    }
+}
 
 const STRIPES_NUM_LEDS: [usize; 58] = [
     0,
@@ -104,17 +123,23 @@ pub struct Monolith {
     texture_capturer: wgpu::TextureCapturer,
     led_coordinates: LedCoordinates,
     collision_detector: CollisionDetector,
-    viewpoint: Arc<Mutex<Point2>>,
+    viewpoint: Arc<Mutex<Option<Point2>>>,
     time_animation: Instant,
     stripe: Vec<usize>,
+    client_configs: Arc<Mutex<Vec<Client>>>,
+    cones: Cones,
+    new: Arc<Mutex<bool>>,
 }
-
-pub struct Cone {}
 
 pub struct LedCoordinates {
     led_2d: Vec<Point2>,
     led_2d_image: Vec<Point2>,
     led_3d: Vec<Point3<f32>>,
+}
+
+pub struct Cones {
+    positions: Vec<Vector<f32>>,
+    tracking_time_left: Duration,
 }
 
 impl LedCoordinates {
@@ -154,15 +179,7 @@ impl LedCoordinates {
             .map(|c| Monolith::from_nannou_to_image(*c))
             .collect();
         let led_3d = [led_3d_n, led_3d_w, led_3d_s, led_3d_e].concat();
-        println!("{}", led_3d[20]);
-        println!("{}", led_3d[1330]);
-        // println!("{}", led_3d[1268]);
-        // println!("XXX");
-        // println!("{}", led_2d[1290]);
-        // println!("{}", led_3d[1290]);
-        // println!("XXX");
-        // println!("{}", led_2d[1309]);
-        // println!("{}", led_3d[1309]);
+
         LedCoordinates {
             led_2d,
             led_2d_image,
@@ -197,13 +214,21 @@ impl Monolith {
             Frame::TEXTURE_FORMAT,
         );
 
-        let position = Arc::new(Mutex::new(Point2::default()));
+        let position = Arc::new(Mutex::new(Some(Point2::default())));
         let position_clone = Arc::clone(&position);
-
+        let new = Arc::new(Mutex::new(false));
+        let new_clone = Arc::clone(&new);
         thread::spawn(move || {
-            let mut motion_tracker = VideoProcessor::new(position_clone).unwrap();
+            let mut motion_tracker = VideoProcessor::new(position_clone, new_clone).unwrap();
             motion_tracker.process_frames();
         });
+
+        let client_configs = vec![
+            Client::new("192.168.1.186:34254", 0..626),
+            Client::new("192.168.1.186:34255", 626..1310),
+            Client::new("192.168.1.219:34254", 1310..1936),
+            Client::new("192.168.1.219:34255", 1936..2620),
+        ];
 
         Monolith {
             window_id,
@@ -217,6 +242,16 @@ impl Monolith {
             viewpoint: position,
             time_animation: Instant::now(),
             stripe: Vec::new(),
+            client_configs: Arc::new(Mutex::new(client_configs)),
+            cones: Cones {
+                positions: vec![
+                    Vector::new(3000.0, 2000.0, 0.0),
+                    Vector::new(3000.0, 2000.0, 3000.0),
+                    Vector::new(3000.0, 2000.0, 0.0),
+                ],
+                tracking_time_left: FLEEING_TIME,
+            },
+            new,
         }
     }
 
@@ -234,7 +269,6 @@ impl Monolith {
 
     pub fn update(&mut self, app: &App, update: &Update) {
         let window = &app.window(self.window_id).unwrap();
-        // println!("{:?}", &self.viewpoint.lock().unwrap()); // Print the viewpoint_clone
         self.draw(update);
         #[cfg(debug_assertions)]
         self.draw_debug(update);
@@ -243,27 +277,27 @@ impl Monolith {
 
     fn draw(&mut self, update: &Update) {
         let mut rng = rand::thread_rng();
-        self.draw.reset();
-        self.draw.background().color(WHITE);
-
-        for i in 0..((NUM_LED_SIDE - 1) * 2) {
-            self.render_led(
-                i,
-                Srgb::new(
-                    rng.gen_range(230..255),
-                    rng.gen_range(230..255),
-                    rng.gen_range(230..255),
-                ),
-            )
-        }
-
         let time_since_update = update.since_last.secs();
-
         let time_since_start = update.since_start.secs();
+        self.draw.reset();
+        self.draw.background().color(BLACK);
 
-        let pos = (*self.viewpoint.lock().unwrap()).clone();
-        // println!("{:?}", &pos); // Print the viewpoint_clone
-        let view = Monolith::from_camera_to_col(pos);
+        //         for i in 0..((NUM_LED_SIDE - 1) * 2) {
+        //             self.render_led(
+        //                 i,
+        //                 Srgb::new(
+        //                     rng.gen_range(230..255),
+        //                     rng.gen_range(230..255),
+        //                     rng.gen_range(230..255),
+        //                 ),
+        //             )
+        //         }
+        let steps: usize = 300;
+        let stroke_weight = HEIGHT / (HEIGHT / steps as f32);
+        // for i in (-(HEIGHT * 2.0) as i32..(HEIGHT * 2.0) as i32).step_by(steps) {
+        //     self.draw_line(stroke_weight, time_since_start as f32, i as f32)
+        // }
+
         // println!("{:?}", &view); // Print the viewpoint_clone
         // self.draw
         //     .line()
@@ -289,37 +323,120 @@ impl Monolith {
         //         (time_since_start.sin() * (WIDTH_NET as f64)) as f32 / 2.0,
         //         HEIGHT / 2.0,
         //     ));
-        if self.time_animation.elapsed() > Duration::from_millis(1000) {
-            self.time_animation = Instant::now();
-            self.stripe = (0..40)
-                .map(|_| rng.gen_range(0..STRIPES_NUM_LEDS.len() - 1))
-                .collect();
-        }
+        // if self.time_animation.elapsed() > Duration::from_millis(1000) {
+        //     self.time_animation = Instant::now();
+        //     self.stripe = (0..15).map(|_| rng.gen_range(14..25)).collect();
+        // }
 
-        for stripe_index in self.stripe.iter() {
-            for i in STRIPES_NUM_LEDS[*stripe_index]..STRIPES_NUM_LEDS[stripe_index + 1] {
-                self.render_led(
-                    i,
-                    Srgb::new(
-                        rng.gen_range(0..132),
-                        rng.gen_range(171..221),
-                        rng.gen_range(254..255),
-                    ),
-                )
+        // for stripe_index in self.stripe.iter() {
+        //     for i in STRIPES_NUM_LEDS[*stripe_index]..STRIPES_NUM_LEDS[stripe_index + 1] {
+        //         self.render_led(
+        //             i,
+        //             Srgb::new(
+        //                 255,
+        //                 255,
+        //                 255,
+        //             ),
+        //         )
+        //     }
+        // }
+        //
+        let pos = (*self.viewpoint.lock().unwrap()).clone();
+        let mut new = self.new.lock().unwrap();
+        *new = match *new {
+            true => {
+                self.cones.tracking_time_left = Duration::new(3, 0);
+                false
             }
+            false => false,
+        };
+
+        let view = match pos {
+            Some(expr) => Monolith::from_camera_to_col(expr),
+            None => Vector::default(),
+        };
+        let range = 200.0;
+
+        for i in 0..self.cones.positions.len() {
+            let x_offset = rng.gen_range(-range..range);
+            let y_offset = rng.gen_range(-range..range);
+            let z_offset = rng.gen_range(-range..range);
+            if self.cones.tracking_time_left.is_zero() {
+                self.cones.positions[i] = Vector::new(
+                    self.cones.positions[i].x + x_offset * 10.0,
+                    self.cones.positions[i].y + y_offset * 10.0,
+                    self.cones.positions[i].z + z_offset * 10.0,
+                );
+                self.cones.positions[i] = self.cones.positions[i].normalize() * 3000.0;
+            } else {
+                let distance: Vector<Real> = (view - self.cones.positions[i]).into();
+                self.cones.positions[i] = (distance * 0.1) + self.cones.positions[i];
+                self.cones.tracking_time_left = self
+                    .cones
+                    .tracking_time_left
+                    .saturating_sub(Duration::from_secs_f64(time_since_update / 3.0))
+            }
+            self.cones.positions[i] = Vector::new(
+                self.cones.positions[i].x + x_offset,
+                self.cones.positions[i].y + y_offset,
+                self.cones.positions[i].z + z_offset,
+            );
         }
 
-        self.draw_viewcone(time_since_start, view, 300.0, BLACK);
+        // self.draw_viewcone(time_since_start, view, 400.0, 50.0, 1.0, 1.0);
+
+        self.draw_viewcone2(
+            time_since_start,
+            self.cones.positions[0].into(),
+            200.0,
+            CYAN,
+        );
+        self.draw_viewcone2(
+            time_since_start,
+            self.cones.positions[1].into(),
+            200.0,
+            YELLOW,
+        );
+        self.draw_viewcone2(
+            time_since_start,
+            self.cones.positions[2].into(),
+            200.0,
+            MAGENTA,
+        );
+
+        let time_since_start = update.since_last.secs();
+        let string = format!("{:.2}", time_since_start);
+        self.draw
+            .text(&string)
+            .color(HOTPINK)
+            .font_size(96)
+            .align_text_bottom()
+            .left_justify()
+            .w_h(WIDTH_NET - 96.0, HEIGHT - 96.0);
     }
 
-    fn draw_viewcone(&self, update: f64, view: Point3<Real>, circle_radius: f32, color: Srgb<u8>) {
-        // let view = Point3::new(2000.0, 1800.0, 0.0);
-        // let rotation =
-        // Rotation3::from_axis_angle(&parry3d::na::Vector3::y_axis(), (update / 8.0) as f32);
-        //         let rotation2 =
-        //             Rotation3::from_axis_angle(&parry3d::na::Vector3::x_axis(), (update * 2.10) as f32);
-        // let view = rotation *  view;
+    fn draw_line(&self, stroke_weight: f32, time_since_update: f32, y: f32) {
+        let t = time_since_update * 0.5;
+        let k = PI / HEIGHT;
+        let y = y + (HEIGHT / 2.0) * (k * y).cos() * (t).cos();
 
+        self.draw
+            .line()
+            .hsv(0.55, 1.0, 1.0)
+            .stroke_weight(y.abs() / 10.0 + 60.0)
+            .start(Point2::new(-WIDTH_NET / 2.0, y))
+            .end(Point2::new(WIDTH_NET / 2.0, y));
+    }
+
+    fn draw_viewcone(
+        &self,
+        update: f64,
+        view: Point3<Real>,
+        circle_radius: f32,
+        h: ColorScalar,
+        s: ColorScalar,
+        v: ColorScalar,
+    ) {
         for (i, coordinate) in self.led_coordinates.led_2d.iter().enumerate() {
             if self.collision_detector.detect_collison(
                 view,
@@ -327,6 +444,24 @@ impl Monolith {
                 circle_radius,
             ) {
                 self.draw
+                    .ellipse()
+                    .hsv(h, s, v)
+                    .w(10.0)
+                    .h(10.0)
+                    .x_y(coordinate.x as f32, coordinate.y as f32);
+            }
+        }
+    }
+
+    fn draw_viewcone2(&self, update: f64, view: Point3<Real>, circle_radius: f32, color: Srgb<u8>) {
+        for (i, coordinate) in self.led_coordinates.led_2d.iter().enumerate() {
+            if self.collision_detector.detect_collison(
+                view,
+                &self.led_coordinates.led_3d[i],
+                circle_radius,
+            ) {
+                self.draw
+                    .blend(BLEND_ADD)
                     .ellipse()
                     .color(color)
                     .w(10.0)
@@ -344,16 +479,6 @@ impl Monolith {
             .stroke(HOTPINK)
             .stroke_weight(4.0);
 
-        let time_since_update = update.since_last.secs();
-        let string = format!("{:.2}", time_since_update);
-        self.draw
-            .text(&string)
-            .color(HOTPINK)
-            .font_size(96)
-            .align_text_bottom()
-            .left_justify()
-            .w_h(WIDTH_NET - 96.0, HEIGHT - 96.0);
-
         for num_leds in &STRIPES_NUM_LEDS[1..58] {
             self.render_led(*num_leds - 2, RED);
             self.render_led(*num_leds - 1, RED);
@@ -368,12 +493,13 @@ impl Monolith {
         transform.transform_point2(point)
     }
 
-    fn from_camera_to_col(point: Point2) -> Point3<Real> {
-        let mm_per_px = 6220.0 / 308.0;
-        Point3::new(
-            point.y * mm_per_px - 2700.0,
+    fn from_camera_to_col(point: Point2) -> Vector<Real> {
+        let mm_per_px_x = 2340.0 / 90.0;
+        let mm_per_px_y = 6220.0 / 265.0;
+        Vector::new(
+            point.y * mm_per_px_x - 3000.0,
             1880.0,
-            -point.x * mm_per_px + 5000.0,
+            -point.x * mm_per_px_y + 5400.0,
         )
     }
 
@@ -414,27 +540,24 @@ impl Monolith {
             .capture(device, &mut encoder, &self.texture);
         window.queue().submit(Some(encoder.finish()));
         let led_coordinates = self.led_coordinates.led_2d_image[0..NUM_LEDS_TO_SEND].to_vec();
-
-        let sender = osc::sender()
-            .expect("Could not bind to default socket")
-            .connect(RASPBERRY_PI_ADDRESS)
-            .expect("Could not connect to socket at address");
-        let sender = Arc::new(Mutex::new(sender));
+        let sender_clone = self.client_configs.clone();
 
         snapshot
             .read(move |result| {
                 let image = result.expect("failed to map texture memory").to_owned();
                 let addr = "/";
-                let args = Monolith::get_pixels(led_coordinates, &image);
-                let sender = sender.lock().unwrap();
-                // println!("{:?}", args[20]);
-                sender.send((addr, args)).ok();
+                let sender = sender_clone.lock().unwrap();
+                for client in sender.iter() {
+                    let args =
+                        Monolith::get_pixels(&led_coordinates[client.led_range.clone()], &image);
+                    client.sender.send((addr, args)).ok();
+                }
             })
             .unwrap();
     }
 
     fn get_pixels(
-        led_coordinates: Vec<Point2>,
+        led_coordinates: &[Point2],
         image: &ImageBuffer<nannou::image::Rgba<u8>, Vec<u8>>,
     ) -> Vec<Type> {
         let mut pixels: Vec<Type> = Vec::new();

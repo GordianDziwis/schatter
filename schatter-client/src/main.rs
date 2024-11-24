@@ -1,34 +1,43 @@
-use std::io::Read;
-use std::net::TcpListener;
-use std::{env, thread, time};
+use core::time;
+use std::{env, thread};
 
 use nannou_osc as osc;
 use osc::Packet;
 use schatter_client::{display, osc_color_to_rgb8};
 use smart_leds::colors::*;
-use smart_leds::{gamma, SmartLedsWrite, RGB8};
+use smart_leds::{SmartLedsWrite, RGB8};
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use ws281x_rpi::Ws2812Rpi;
 
-const PIN: i32 = 21;
-const NUM_LEDS: i32 = 655;
-// const NUM_LEDS: i32 = 2620;
-const PORT: u16 = 34254;
-const MTU: usize = 50000;
+const NUM_LEDS: i32 = 700;
+const MTU: usize = 10000;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let usage = format!("usage: {} {{ test,stream }}", &args[0]);
-    if args.len() < 2 {
-        println!("{}", usage);
-        ::std::process::exit(1)
-    }
+    let usage = format!(
+        "usage: {} {{ test,stream }} {{ port }} {{ pin }} {{ dma }}",
+        &args[0]
+    );
+
+    let port: u16 = match args.get(2) {
+        Some(p) => p.parse().expect("Invalid port number"),
+        None => 12345,
+    };
+    let pin: i32 = match args.get(3) {
+        Some(p) => p.parse().expect("Invalid pin"),
+        None => 18,
+    };
+    let dma: i32 = match args.get(4) {
+        Some(p) => p.parse().expect("Invalid dma"),
+        None => 10,
+    };
 
     match args[1].as_str() {
         "test" => {
-            test();
+            test(pin, dma);
         }
         "stream" => {
-            stream();
+            stream(port, pin, dma);
         }
         _ => {
             println!("{}", usage);
@@ -37,27 +46,40 @@ fn main() {
     }
 }
 
-fn stream() {
-    let mut ws = Ws2812Rpi::new(NUM_LEDS, PIN).unwrap();
-    let receiver = osc::Receiver::bind_with_mtu(PORT, 50000).expect("Could not bind to socket");
+fn stream(port: u16, pin: i32, dma: i32) {
+    let receiver = osc::Receiver::bind_with_mtu(port, MTU).expect("Could not bind to socket");
+    let (packet, _) = receiver.recv().unwrap();
+    let len = get_rgb(packet).len();
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    let mut ws = Ws2812Rpi::new(len.try_into().unwrap(), pin, dma).unwrap();
     loop {
-        // Receive any pending osc packets.
         for (packet, _) in receiver.iter() {
-            // const DELAY: time::Duration = time::Duration::from_millis(100);
+            // const DELAY: time::Duration = time::Duration::from_millis(30);
             // thread::sleep(DELAY);
             let stripe = get_rgb(packet);
-            // let stripe_gamma_corrected = gamma(stripe.iter().cloned()).collect();
             #[cfg(debug_assertions)]
-            // display(&stripe);
+            display(&stripe);
+            #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
             ws.write(stripe.iter().cloned()).unwrap();
         }
     }
 }
 
-fn test() {
-    let mut ws = Ws2812Rpi::new(NUM_LEDS, PIN).unwrap();
+fn test(pin: i32, dma: i32) {
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    let mut ws = Ws2812Rpi::new(NUM_LEDS, pin, dma).unwrap();
     let pattern: Vec<RGB8> = vec![
         WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
         BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
     ];
     let mut stripe = Vec::default();
@@ -65,19 +87,20 @@ fn test() {
         let n = (i as usize) % pattern.len();
         stripe.push(pattern[n]);
     }
-
     loop {
-        // const DELAY: time::Duration = time::Duration::from_millis(1);
-        // thread::sleep(DELAY);
+        const DELAY: time::Duration = time::Duration::from_millis(5);
+        thread::sleep(DELAY);
         #[cfg(debug_assertions)]
         display(&stripe);
         stripe.rotate_right(1);
+        #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
         match ws.write(stripe.iter().cloned()) {
             Ok(_) => (),
             Err(e) => println!("{}", e),
         }
     }
 }
+
 fn get_rgb(packet: Packet) -> Vec<RGB8> {
     packet
         .into_msgs()

@@ -18,8 +18,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::io::Write;
 
-const RASPBERRY_PI_ADDRESS: &str = "127.0.0.1:34254";
-
 fn main() {
     nannou::app(model).update(update).run();
 }

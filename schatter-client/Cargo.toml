@@ -9,12 +9,9 @@ smart-leds = "0.3.0"
 termion = "1.5.6"
 colored = "2.0"
 rand = "0.8.3"
-serde_json = "1.0"
-ws281x-rpi = { path = "./../../ws281x-rpi/" }
 
-[dependencies.rgb]
-version = "0.8.36"
-features = ["serde"]
+[target.'cfg(any(target_arch = "arm", target_arch = "aarch64"))'.dependencies]
+ws281x-rpi = { path = "./../../ws281x-rpi/" }
 
 [package.metadata.cross.target.armv7-unknown-linux-gnueabihf]
 pre-build = ["apt-get update && apt-get install --assume-yes libclang-dev clang"]
